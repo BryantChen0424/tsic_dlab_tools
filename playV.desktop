@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=playV
+Exec=/home/verilog/playV_dev/playV.py
+Icon=/home/verilog/playV_dev/playV.png
+Terminal=true
+Categories=Utility;
+StartupWMClass=playV
