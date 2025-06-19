@@ -38,9 +38,17 @@ class playV(Gtk.Application):
         if not self.labs_root.is_dir():
             raise SystemExit(f"LABSROOT 不是資料夾：{self.labs_root}")
 
-        self.subdirs = sorted(p for p in self.labs_root.iterdir() if p.is_dir())
-        self.child_map = {p: sorted(c for c in p.iterdir() if c.is_dir())
-                          for p in self.subdirs}
+        self.subdirs = sorted(
+            p for p in self.labs_root.iterdir()
+            if p.is_dir() and not p.name.startswith('.')
+        )
+        self.child_map = {
+            p: sorted(
+                c for c in p.iterdir()
+                if c.is_dir() and not c.name.startswith('.')
+            )
+            for p in self.subdirs
+        }
         self.store = Gtk.ListStore(str, str, str)
         self.row_map = {}
         self._populate_store()
