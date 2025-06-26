@@ -7,7 +7,7 @@ OBJ_DIR   = obj_dir
 VCD       = wave.vcd
 
 # verilator 的 flags
-VERILATOR_FLAGS = --trace
+VERILATOR_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --trace
 
 .PHONY: all dut test clean
 
