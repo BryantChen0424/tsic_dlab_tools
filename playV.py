@@ -10,6 +10,11 @@ COLOR_MAP = {
     "FAIL": "#f0a8a8",
 }
 
+DSRC_DIR = "design_src"
+SSRC_DIR = "sim_src"
+SRES_DIR = "sim_result"
+GOLDEN_DIR = "golden"
+
 class TeeStream:
     def __init__(self, gui_callback, orig_stream, sync_filter_func):
         self.gui_callback = gui_callback
@@ -67,17 +72,14 @@ class playV(Gtk.Application):
         win.set_wmclass("playV", "playV")
         win.set_title("playV v3.0")
 
-        # 取得螢幕大小並設為預設視窗大小
         screen = win.get_screen()
         width = screen.get_width()
         height = screen.get_height()
         win.set_default_size(width, height)
 
-        # ==== 主分割區 ====
         hpaned = Gtk.Paned.new(Gtk.Orientation.HORIZONTAL)
         win.add(hpaned)
 
-        # ==== 左半部：原 GUI ====
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         main_box.set_border_width(20)
         hpaned.add1(main_box)
@@ -95,17 +97,36 @@ class playV(Gtk.Application):
         self.combo_child.connect("changed", lambda *_: self.switch_to_selected())
         self.combo_child.hide()
 
+        # 第一行按鈕區
         hbox = Gtk.Box(spacing=10)
         main_box.pack_start(hbox, False, False, 0)
+
         self.btn_code  = Gtk.Button(label="Code Editor")
         self.btn_test  = Gtk.Button(label="Simulation")
-        self.btn_wave  = Gtk.Button(label="Show Waveform")
-        self.btn_code .connect("clicked", self.open_vscode)
-        self.btn_test .connect("clicked", lambda *_: self.run_make_async("clean test"))
-        self.btn_wave .connect("clicked", self.open_gtkwave)
-        self.all_buttons = [self.btn_code, self.btn_test, self.btn_wave]
-        for b in self.all_buttons:
-            hbox.pack_start(b, True, True, 0)
+        self.btn_wave  = Gtk.Button(label="Waveform (yours)")
+
+        self.btn_code.connect("clicked", self.open_vscode)
+        self.btn_test.connect("clicked", lambda *_: self.run_make_async("test"))
+        self.btn_wave.connect("clicked", self.open_gtkwave)
+
+        hbox.pack_start(self.btn_code, True, True, 0)
+        hbox.pack_start(self.btn_test, True, True, 0)
+        hbox.pack_start(self.btn_wave, True, True, 0)
+
+        # 第二行單獨放 golden 波形按鈕
+        hbox_golden = Gtk.Box(spacing=10)
+        main_box.pack_start(hbox_golden, False, False, 0)
+
+        self.btn_show_golden_log = Gtk.Button(label="Result (golden)")
+        self.btn_wave_golden = Gtk.Button(label="Waveform (golden)")
+
+        self.btn_show_golden_log.connect("clicked", self.show_golden_log)
+        self.btn_wave_golden.connect("clicked", self.open_gtkwave_golden)
+
+        hbox_golden.pack_start(self.btn_show_golden_log, True, True, 0)
+        hbox_golden.pack_start(self.btn_wave_golden, True, True, 0)
+
+        self.all_buttons = [self.btn_code, self.btn_test, self.btn_wave, self.btn_show_golden_log, self.btn_wave_golden]
 
         tree = Gtk.TreeView(model=self.store)
         tree.set_headers_visible(True)
@@ -134,6 +155,10 @@ class playV(Gtk.Application):
         main_box.pack_start(frame, True, True, 0)
         hbox2 = Gtk.Box(spacing=10)
         main_box.pack_start(hbox2, False, False, 0)
+        self.btn_refresh_status = Gtk.Button(label="Refresh Status")
+        self.btn_refresh_status.connect("clicked", self.on_refresh_status_clicked)
+        hbox2.pack_start(self.btn_refresh_status, True, True, 0)
+        self.all_buttons.insert(0, self.btn_refresh_status)
         self.btn_reset_all = Gtk.Button(label="Reset Simulation All")
         self.btn_reset_all.connect("clicked", self.on_reset_all_clicked)
         hbox2.pack_start(self.btn_reset_all, True, True, 0)
@@ -146,9 +171,19 @@ class playV(Gtk.Application):
         self.tree = tree
         self.set_buttons_sensitive(False)
 
-        # ==== 右半部：simulation result with overlay ====
         term_frame = Gtk.Frame(label="Simulation Result")
         hpaned.add2(term_frame)
+
+        # === 右半部 VBox 包含 Clear 按鈕與 terminal 區塊 ===
+        term_right_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        term_frame.add(term_right_vbox)
+
+        # Clear 按鈕
+        self.btn_clear_terminal = Gtk.Button(label="Clear")
+        self.btn_clear_terminal.connect("clicked", self.on_clear_terminal_clicked)
+        term_right_vbox.pack_start(self.btn_clear_terminal, False, False, 0)
+
+        # TextView + overlay
         self.term_view = Gtk.TextView()
         self.term_view.set_editable(False)
         self.term_view.set_cursor_visible(False)
@@ -160,7 +195,6 @@ class playV(Gtk.Application):
         term_scroll.set_vexpand(True)
         term_scroll.add(self.term_view)
 
-        # --- Overlay for simulation busy state ---
         self.term_overlay = Gtk.Overlay()
         self.term_overlay.add(term_scroll)
 
@@ -185,7 +219,7 @@ class playV(Gtk.Application):
         self.sim_mask.add(overlay_box)
         self.term_overlay.add_overlay(self.sim_mask)
 
-        term_frame.add(self.term_overlay)
+        term_right_vbox.pack_start(self.term_overlay, True, True, 0)
 
         win.show_all()
         self.sim_mask.hide()
@@ -209,10 +243,12 @@ class playV(Gtk.Application):
 
         if text.endswith("\n"):
             text = text[:-1]
-        if text.strip() == "##SEC_STUDENT_CAN_SEE":
+        if "##SEC_STUDENT_CAN_SEE" in text:
             self.sync_output = True
+            prob_name = self.current_prob or "(unnamed)"
+            self.append_to_terminal(f"【{prob_name}】\n")
             return False
-        elif text.strip() == "##END_STUDENT_CAN_SEE":
+        elif "##END_STUDENT_CAN_SEE" in text:
             self.sync_output = False
             return False
         elif self.sync_output:
@@ -335,7 +371,7 @@ class playV(Gtk.Application):
             self.sim_running = False
 
     def show_sim_error_popup(self, message):
-        dialog = Gtk.Dialog(title="Error Message", parent=None, flags=Gtk.DialogFlags.MODAL)
+        dialog = Gtk.Dialog(title="Error Message", parent=None, modal=True)
         dialog.set_modal(True)
         dialog.set_deletable(False)
         dialog.set_resizable(True)
@@ -376,7 +412,7 @@ class playV(Gtk.Application):
     @staticmethod
     def _read_status():
         try:
-            txt = (pathlib.Path.cwd() / "result.txt").read_text().strip().lower()
+            txt = (pathlib.Path.cwd() / SRES_DIR / "result.txt").read_text().strip().lower()
             return "PASS" if txt == "pass" else "FAIL"
         except Exception:
             return "FAIL"
@@ -387,17 +423,39 @@ class playV(Gtk.Application):
             self.store.set(it, (STATUS_COL,), (status,))
 
     def open_vscode(self, *_):
-        cwd = pathlib.Path.cwd()
+        cwd = pathlib.Path.cwd() / DSRC_DIR
         v_files = sorted(str(p) for p in cwd.glob("*.v"))
         cmd = ["code", "-n", str(cwd)] + v_files
         threading.Thread(target=self._run_and_log, args=(cmd,), daemon=True).start()
 
     def open_gtkwave(self, *_):
-        wave = pathlib.Path.cwd() / "wave.vcd"
+        wave = pathlib.Path.cwd() / SRES_DIR / "wave.vcd"
         if wave.is_file():
             threading.Thread(target=self._run_and_log, args=(["gtkwave", str(wave)],), daemon=True).start()
         else:
             msg = "[playV] wave.vcd 不存在\n"
+            sys.stderr.write(msg)
+            GLib.idle_add(self.gui_sync_output, msg)
+
+    def show_golden_log(self, *_):
+        golden_log = pathlib.Path.cwd() / GOLDEN_DIR / "golden_log.txt"
+        prob_name = self.current_prob or "(unnamed)"
+        self.append_to_terminal(f"【{prob_name}】 golden\n")
+        try:
+            content = golden_log.read_text().strip()
+        except Exception as e:
+            content = f"[playV] 無法讀取 golden_log.txt: {e}"
+        for line in content.splitlines():
+            if line.strip().startswith("##"):
+                continue
+            self.append_to_terminal(line + "\n")
+
+    def open_gtkwave_golden(self, *_):
+        wave = pathlib.Path.cwd() / GOLDEN_DIR / "golden_wave.vcd"
+        if wave.is_file():
+            threading.Thread(target=self._run_and_log, args=(["gtkwave", str(wave)],), daemon=True).start()
+        else:
+            msg = "[playV] golden_wave.vcd 不存在\n"
             sys.stderr.write(msg)
             GLib.idle_add(self.gui_sync_output, msg)
 
@@ -415,13 +473,16 @@ class playV(Gtk.Application):
         return False
 
     def set_buttons_sensitive(self, flag):
-        # 只控制按鈕，不動選單
         if self._busy:
             for w in self.all_buttons:
                 w.set_sensitive(False)
         else:
             for w in self.all_buttons:
                 w.set_sensitive(flag)
+
+            self.btn_refresh_status.set_sensitive(True)
+            self.btn_reset_all.set_sensitive(True)
+            self.btn_test_all.set_sensitive(True)
 
     def _show_cwd(self, dirpath):
         try:
@@ -441,6 +502,61 @@ class playV(Gtk.Application):
                 target = self.labs_root / self.current_lab
             os.chdir(target)
             self.lbl_cwd.set_text(f"Current CWD: {target}")
+    
+    def on_refresh_status_clicked(self, *_):
+        if self._busy:
+            return
+        self.set_busy(True)
+        threading.Thread(target=self._refresh_all_status, daemon=True).start()
+
+    def _refresh_all_status(self):
+        self.subdirs = sorted(
+            p for p in self.labs_root.iterdir()
+            if p.is_dir() and not p.name.startswith('.')
+        )
+        self.child_map = {
+            p: sorted(
+                c for c in p.iterdir()
+                if c.is_dir() and not c.name.startswith('.')
+            )
+            for p in self.subdirs
+        }
+
+        GLib.idle_add(self._refresh_store_and_status)
+
+    def _refresh_store_and_status(self):
+        self.store.clear()
+        self.row_map.clear()
+        for lab in self.subdirs:
+            probs = self.child_map[lab] or [""]
+            for prob in probs:
+                p_name = prob.name if isinstance(prob, pathlib.Path) else prob
+                it = self.store.append([lab.name, p_name, "NULL"])
+                self.row_map[(lab.name, p_name)] = it
+                dirpath = lab / p_name if p_name else lab
+                result_file = dirpath / SRES_DIR / "result.txt"
+                try:
+                    txt = result_file.read_text().strip().lower()
+                    status = "PASS" if txt == "pass" else "FAIL"
+                except Exception:
+                    status = "NULL"
+                self.store.set(it, (STATUS_COL,), (status,))
+        self.refresh_child_options()
+        self.switch_to_selected()
+        self.set_busy(False)
+
+    def _reload_lab_structure(self):
+        self.subdirs = sorted(
+            p for p in self.labs_root.iterdir()
+            if p.is_dir() and not p.name.startswith('.')
+        )
+        self.child_map = {
+            p: sorted(
+                c for c in p.iterdir()
+                if c.is_dir() and not c.name.startswith('.')
+            )
+            for p in self.subdirs
+        }
 
     def on_reset_all_clicked(self, *_):
         if self._busy:
@@ -449,6 +565,7 @@ class playV(Gtk.Application):
         threading.Thread(target=self._reset_all, daemon=True).start()
 
     def _reset_all(self):
+        self._reload_lab_structure()
         for lab in self.subdirs:
             for prob in self.child_map[lab] or [None]:
                 if prob:
@@ -469,7 +586,11 @@ class playV(Gtk.Application):
         self.set_busy(True)
         threading.Thread(target=self._test_all, daemon=True).start()
 
+    def on_clear_terminal_clicked(self, *_):
+        self.term_buffer.set_text("")
+
     def _test_all(self):
+        self._reload_lab_structure()
         for lab in self.subdirs:
             for prob in self.child_map[lab] or [None]:
                 if prob:
@@ -482,7 +603,7 @@ class playV(Gtk.Application):
                 self._run_and_log(["make", "test"], cwd=dirpath)
                 status = "FAIL"
                 try:
-                    txt = (dirpath / "result.txt").read_text().strip().lower()
+                    txt = (dirpath / SRES_DIR / "result.txt").read_text().strip().lower()
                     if txt == "pass":
                         status = "PASS"
                 except Exception:
