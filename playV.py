@@ -599,6 +599,8 @@ class playV(Gtk.Application):
                 else:
                     dirpath = lab
                     prob_name = ""
+                self.current_lab = lab.name
+                self.current_prob = prob.name if prob else ""
                 GLib.idle_add(self._show_cwd, dirpath)
                 self._run_and_log(["make", "test"], cwd=dirpath)
                 status = "FAIL"
