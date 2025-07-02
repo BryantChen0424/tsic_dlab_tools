@@ -174,6 +174,17 @@ class playV(Gtk.Application):
         term_frame = Gtk.Frame(label="Simulation Result")
         hpaned.add2(term_frame)
 
+        danger_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        danger_label = Gtk.Label()
+        danger_label.set_markup('<span foreground="red"><b>Dangerous Zone</b></span>')
+        danger_box.pack_start(danger_label, False, False, 0)
+
+        btn_reset_all_design = Gtk.Button(label="Reset Every Design")
+        btn_reset_all_design.connect("clicked", self.on_reset_all_design_clicked)
+        danger_box.pack_start(btn_reset_all_design, False, False, 0)
+
+        main_box.pack_end(danger_box, False, False, 0)
+
         # === 右半部 VBox 包含 Clear 按鈕與 terminal 區塊 ===
         term_right_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         term_frame.add(term_right_vbox)
@@ -613,6 +624,30 @@ class playV(Gtk.Application):
                 GLib.idle_add(self._update_status, lab.name, prob_name, status)
         GLib.idle_add(self.set_busy, False)
         GLib.idle_add(self._restore_selected_cwd)
+
+    def on_reset_all_design_clicked(self, *_):
+        dialog = Gtk.MessageDialog(
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Will erase all of your Verilog code. Do you want to continue?"
+        )
+        dialog.set_modal(True)
+        response = dialog.run()
+        dialog.destroy()
+
+        if response == Gtk.ResponseType.YES:
+            dev_root = os.environ.get("LABS_DEV_ROOT")
+            pub_root = os.environ.get("LABS_PUBLIC_ROOT")
+            if not dev_root or not pub_root:
+                self.append_to_terminal("[playV] LABS_DEV_ROOT or LABS_PUBLIC_ROOT not set.\n")
+                return
+            cmd = f'''
+                    git -C "{dev_root}" pull
+                    rm -rf "{pub_root}"/lab*
+                    cp -r "{dev_root}"/lab*/ "{pub_root}"/
+                    '''
+            threading.Thread(target=self._run_and_log, args=(["bash", "-c", cmd],), daemon=True).start()
+            threading.Thread(target=self._refresh_all_status, daemon=True).start()
 
 if __name__ == "__main__":
     playV().run()
