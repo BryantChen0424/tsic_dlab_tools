@@ -3,6 +3,5 @@ Type=Application
 Name=playV
 Exec=/home/verilog/Desktop/dlab/.private/playV_dev/playV.py
 Icon=/home/verilog/Desktop/dlab/.private/playV_dev/playV.png
-Terminal=true
 Categories=Utility;
 StartupWMClass=playV
