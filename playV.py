@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import gi, os, sys, pathlib, subprocess, threading
+
+# GTK Initialization
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, Gdk
 
@@ -38,36 +40,73 @@ class playV(Gtk.Application):
         super().__init__(application_id="tw.nycu.playv.v3_0")
         root = os.environ.get("LABSROOT")
         if not root:
-            raise SystemExit("❌  請先設定 LABSROOT")
+            raise SystemExit("❌ Please set LABSROOT")
         self.labs_root = pathlib.Path(root).expanduser()
         if not self.labs_root.is_dir():
-            raise SystemExit(f"LABSROOT 不是資料夾：{self.labs_root}")
+            raise SystemExit(f"LABSROOT is not a directory: {self.labs_root}")
 
-        self.subdirs = sorted(
-            p for p in self.labs_root.iterdir()
-            if p.is_dir() and not p.name.startswith('.')
-        )
-        self.child_map = {
-            p: sorted(
-                c for c in p.iterdir()
-                if c.is_dir() and not c.name.startswith('.')
-            )
-            for p in self.subdirs
-        }
+        # Initialize but defer content setting until do_activate
+        self.subdirs = []
+        self.child_map = {}
         self.store = Gtk.ListStore(str, str, str)
         self.row_map = {}
-        self._populate_store()
         self._busy = False
         self._combo_ignore = False
         self.sync_output = False
         self.current_lab = None
         self.current_prob = None
-        # for v3.0: simulation tracking
         self.sim_running = False
         self.sim_terminal_buffer = ""
         self.sim_student_can_see = False
 
     def do_activate(self):
+        print("✅ GUI starting...")
+
+        # Rebuild directory structure
+        self.subdirs = sorted(
+            [p for p in self.labs_root.iterdir() if p.is_dir() and not p.name.startswith('.')]
+        )
+
+        if not self.subdirs:
+            dialog = Gtk.MessageDialog(
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text="⚠️ No lab folders found in LABSROOT."
+            )
+            dialog.set_modal(True)
+            dialog.run()
+            dialog.destroy()
+            self.quit()
+            return
+
+        # Set child_map only for valid directories
+        self.child_map = {}
+        for lab in self.subdirs:
+            try:
+                children = [c for c in lab.iterdir() if c.is_dir() and not c.name.startswith('.')]
+                self.child_map[lab] = sorted(children)
+            except Exception as e:
+                print(f"[Warning] Failed to read subdirectories of {lab}: {e}", file=sys.stderr)
+                self.child_map[lab] = []
+
+        print(f"✅ LABSROOT: {self.labs_root}")
+        print(f"✅ labs: {[p.name for p in self.subdirs]}")
+
+        # Prevent proceeding if all subdirectories are also empty (e.g. lab1 has no content)
+        if all(len(children) == 0 for children in self.child_map.values()):
+            dialog = Gtk.MessageDialog(
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text="⚠️ No problems found in any lab folders."
+            )
+            dialog.set_modal(True)
+            dialog.run()
+            dialog.destroy()
+            self.quit()
+            return
+
+        # TODO: Connect to GUI setup logic (e.g., create main window, components, etc.)
+        print("✅ Directory scan and validation complete. Proceed to GUI setup.")
         win = Gtk.ApplicationWindow(application=self)
         win.set_wmclass("playV", "playV")
         win.set_title("playV v3.0")
