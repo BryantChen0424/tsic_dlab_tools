@@ -40,7 +40,8 @@ class playV(Gtk.Application):
         super().__init__(application_id="tw.nycu.playv.v3_0")
         root = os.environ.get("LABSROOT")
         if not root:
-            raise SystemExit("❌ Please set LABSROOT")
+            root = "/home/verilog/Desktop/dlab/public/labs/"
+            # raise SystemExit("❌ Please set LABSROOT")
         self.labs_root = pathlib.Path(root).expanduser()
         if not self.labs_root.is_dir():
             raise SystemExit(f"LABSROOT is not a directory: {self.labs_root}")
